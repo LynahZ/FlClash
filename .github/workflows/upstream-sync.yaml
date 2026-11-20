@@ -3,10 +3,18 @@ name: Sync upstream stable release
 on:
   schedule:
     - cron: '23 * * * *'
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/package-macc.yaml'
   workflow_dispatch:
     inputs:
       dry_run:
         description: Validate the merge without publishing
+        type: boolean
+        default: false
+      package_current:
+        description: Package the fork even when the latest release is already synced
         type: boolean
         default: false
 
@@ -24,6 +32,7 @@ jobs:
     timeout-minutes: 30
     outputs:
       candidate: ${{ steps.merge.outputs.candidate }}
+      revision: ${{ steps.merge.outputs.revision }}
     env:
       GIT_AUTHOR_NAME: github-actions[bot]
       GIT_AUTHOR_EMAIL: 41898282+github-actions[bot]@users.noreply.github.com
@@ -53,15 +62,16 @@ jobs:
           if [[ -f "$RUNNER_TEMP/upstream-sync/application.bundle" ]]; then
             echo 'candidate=true' >> "$GITHUB_OUTPUT"
           fi
+          echo "revision=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
       - uses: actions/setup-go@v5
-        if: steps.merge.outputs.candidate == 'true' || github.event_name == 'workflow_dispatch'
+        if: steps.merge.outputs.candidate == 'true' || github.event_name != 'schedule'
         with:
           go-version-file: core/go.mod
           cache-dependency-path: core/go.sum
 
       - name: Verify MACC and run core tests
-        if: steps.merge.outputs.candidate == 'true' || github.event_name == 'workflow_dispatch'
+        if: steps.merge.outputs.candidate == 'true' || github.event_name != 'schedule'
         working-directory: core
         env:
           CGO_ENABLED: '0'
@@ -120,3 +130,18 @@ jobs:
             refs+=(refs/sync/core:refs/heads/macc-core)
           fi
           git push --atomic origin "${refs[@]}"
+
+  package:
+    needs: [prepare, publish]
+    if: >-
+      !cancelled() && !inputs.dry_run && needs.prepare.result == 'success' &&
+      (needs.publish.result == 'success' ||
+        (needs.prepare.outputs.candidate != 'true' && (inputs.package_current || github.event_name == 'push')))
+    uses: ./.github/workflows/package-macc.yaml
+    with:
+      revision: ${{ needs.prepare.outputs.revision }}
+    secrets:
+      KEYSTORE: ${{ secrets.KEYSTORE }}
+      KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+      STORE_PASSWORD: ${{ secrets.STORE_PASSWORD }}
+      KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}

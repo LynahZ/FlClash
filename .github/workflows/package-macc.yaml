@@ -1,0 +1,164 @@
+name: Package FlClash with MACC
+
+on:
+  workflow_call:
+    inputs:
+      revision:
+        description: App commit validated by the upstream sync workflow
+        required: true
+        type: string
+    secrets:
+      KEYSTORE:
+      KEY_ALIAS:
+      STORE_PASSWORD:
+      KEY_PASSWORD:
+
+permissions:
+  contents: read
+
+env:
+  FLUTTER_VERSION: '3.50.0'
+  GO_VERSION: '1.27.1'
+  NDK_VERSION: r28c
+
+jobs:
+  build:
+    name: ${{ matrix.platform }} ${{ matrix.arch }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: macos
+            arch: arm64
+            runner: macos-26
+          - platform: macos
+            arch: amd64
+            runner: macos-26-intel
+          - platform: windows
+            arch: amd64
+            runner: windows-2022
+          - platform: windows
+            arch: arm64
+            runner: windows-11-arm
+            flutter-channel: master
+          - platform: android
+            arch: arm64
+            runner: ubuntu-latest
+
+    steps:
+      - name: Enable Git long paths
+        if: matrix.platform == 'windows'
+        run: git config --global core.longpaths true
+
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.revision }}
+          submodules: recursive
+          persist-credentials: false
+
+      - name: Set up native Rust on Windows ARM64
+        if: matrix.runner == 'windows-11-arm'
+        shell: pwsh
+        run: |
+          Invoke-WebRequest -Uri 'https://win.rustup.rs/aarch64' -OutFile "$env:RUNNER_TEMP\rustup-init.exe"
+          & "$env:RUNNER_TEMP\rustup-init.exe" -y --default-toolchain stable
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Add-Content $env:GITHUB_PATH "$env:USERPROFILE\.cargo\bin"
+
+      - name: Ensure Inno Setup is available
+        if: matrix.platform == 'windows'
+        shell: pwsh
+        run: |
+          $inno = "${env:ProgramFiles(x86)}\Inno Setup 6"
+          if (Test-Path "$inno\ISCC.exe") { exit 0 }
+          $installer = "$env:RUNNER_TEMP\innosetup.exe"
+          $inno = "$env:RUNNER_TEMP\Inno Setup 6"
+          Invoke-WebRequest -Uri 'https://github.com/jrsoftware/issrc/releases/download/is-6_7_3/innosetup-6.7.3.exe' -OutFile $installer
+          $process = Start-Process -FilePath $installer -ArgumentList "/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /CURRENTUSER /DIR=`"$inno`"" -Wait -PassThru
+          if ($process.ExitCode -ne 0 -or !(Test-Path "$inno\ISCC.exe")) {
+            throw 'Inno Setup installation failed.'
+          }
+          Add-Content $env:GITHUB_ENV "INNO_SETUP_PATH=$inno"
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: core/go.sum
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: ${{ matrix.flutter-channel || 'stable' }}
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          cache: true
+
+      - name: Select Xcode
+        if: matrix.platform == 'macos'
+        run: |
+          for version in 26.3 26.2; do
+            xcode="/Applications/Xcode_${version}.app"
+            if [[ -d "$xcode" ]]; then
+              sudo xcode-select -s "$xcode"
+              break
+            fi
+          done
+          xcodebuild -version
+
+      - uses: actions/setup-java@v4
+        if: matrix.platform == 'android'
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: gradle/actions/setup-gradle@v6
+        if: matrix.platform == 'android'
+
+      - uses: nttld/setup-ndk@v1
+        if: matrix.platform == 'android'
+        id: ndk
+        with:
+          ndk-version: ${{ env.NDK_VERSION }}
+          link-to-sdk: true
+
+      - name: Configure Android signing
+        if: matrix.platform == 'android'
+        env:
+          KEYSTORE: ${{ secrets.KEYSTORE }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          STORE_PASSWORD: ${{ secrets.STORE_PASSWORD }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          if [[ -z "$KEYSTORE$KEY_ALIAS$STORE_PASSWORD$KEY_PASSWORD" ]]; then
+            echo 'Using Gradle debug signing and the .dev application ID.'
+            exit 0
+          fi
+          if [[ -z "$KEYSTORE" || -z "$KEY_ALIAS" || -z "$STORE_PASSWORD" || -z "$KEY_PASSWORD" ]]; then
+            echo '::error::Set all four Android signing secrets or leave all of them unset.'
+            exit 1
+          fi
+          printf '%s' "$KEYSTORE" | base64 --decode > android/app/keystore.jks
+          printf '\nkeyAlias=%s\nstorePassword=%s\nkeyPassword=%s\n' \
+            "$KEY_ALIAS" "$STORE_PASSWORD" "$KEY_PASSWORD" >> android/local.properties
+
+      - name: Install Flutter dependencies
+        run: flutter pub get
+
+      - name: Fetch the pinned CA bundle
+        shell: bash
+        run: |
+          bundle=core/Clash.Meta/component/ca/ca-certificates.crt
+          curl -fsSL --retry 3 -o "$bundle" https://curl.se/ca/cacert-2026-09-25.pem
+          echo "a41b5d356aea97a529fe27e0f7316d2f9d946d75927476cf9cf1b90637d00505  $bundle" | sha256sum -c -
+
+      - name: Build package
+        env:
+          ANDROID_NDK_HOME: ${{ steps.ndk.outputs.ndk-path }}
+          FLUTTER_MACOS_ARM64_ONLY: ${{ matrix.platform == 'macos' && matrix.arch == 'arm64' }}
+        run: dart tool/package.dart ${{ matrix.platform }} --arch ${{ matrix.arch }} --env stable -v
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: FlClash-MACC-${{ matrix.platform }}-${{ matrix.arch }}
+          path: dist/
+          if-no-files-found: error
