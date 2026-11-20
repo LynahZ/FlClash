@@ -17,10 +17,15 @@ val releaseStoreFile = file("keystore.jks")
 val releaseStorePassword = localProperties.getProperty("storePassword")
 val releaseKeyAlias = localProperties.getProperty("keyAlias")
 val releaseKeyPassword = localProperties.getProperty("keyPassword")
+val maccVersionCode = providers.environmentVariable("FLCLASH_MACC_ANDROID_VERSION_CODE")
+    .orNull?.toInt()
 val hasReleaseSigning = releaseStoreFile.exists() &&
     releaseStorePassword != null &&
     releaseKeyAlias != null &&
     releaseKeyPassword != null
+require(maccVersionCode == null || (maccVersionCode > 0 && hasReleaseSigning)) {
+    "A MACC release requires a positive version code and a configured signing key."
+}
 
 android {
     namespace = "com.follow.clash"
@@ -36,7 +41,7 @@ android {
         applicationId = "com.follow.clash"
         minSdk = flutter.minSdkVersion
         targetSdk = libs.versions.targetSdk.get().toInt()
-        versionCode = flutter.versionCode
+        versionCode = maccVersionCode ?: flutter.versionCode
         versionName = flutter.versionName
     }
 
@@ -44,6 +49,9 @@ android {
         if (hasReleaseSigning) {
             create("release") {
                 storeFile = releaseStoreFile
+                if (maccVersionCode != null) {
+                    storeType = "PKCS12"
+                }
                 storePassword = releaseStorePassword
                 keyAlias = releaseKeyAlias
                 keyPassword = releaseKeyPassword
@@ -68,6 +76,9 @@ android {
             isShrinkResources = true
             if (hasReleaseSigning) {
                 signingConfig = signingConfigs.getByName("release")
+                if (maccVersionCode != null) {
+                    applicationIdSuffix = ".macc"
+                }
             } else {
                 signingConfig = signingConfigs.getByName("debug")
                 applicationIdSuffix = ".dev"

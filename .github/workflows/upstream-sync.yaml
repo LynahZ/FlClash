@@ -97,6 +97,7 @@ jobs:
             git merge-base --is-ancestor "$UPSTREAM_REVISION" "$revision" || continue
             version=$(git show "$revision:pubspec.yaml" | sed -n 's/^version: \([^+]*\).*/\1/p')
             [[ "$version" == "${UPSTREAM_TAG#v}" ]] || continue
+            git grep -Fq 'Verify the Android certificate, application ID and version' "$revision" -- .github/workflows/package-macc.yaml || continue
             artifacts=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run/artifacts" \
               --jq '[.artifacts[] | select(.expired == false and (.name | startswith("FlClash-MACC-")))] | length')
             if [[ "$artifacts" == 5 ]]; then
@@ -185,10 +186,8 @@ jobs:
     with:
       revision: ${{ needs.prepare.outputs.revision }}
     secrets:
-      KEYSTORE: ${{ secrets.KEYSTORE }}
-      KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
-      STORE_PASSWORD: ${{ secrets.STORE_PASSWORD }}
-      KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+      KEYSTORE: ${{ secrets.MACC_ANDROID_KEYSTORE }}
+      SIGNING_PASSWORD: ${{ secrets.MACC_ANDROID_KEYSTORE_PASSWORD }}
 
   release:
     needs: [prepare, package]

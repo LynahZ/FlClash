@@ -72,9 +72,9 @@ Includes MACC support. [GitHub Actions build](https://github.com/$GH_REPO/action
 - Windows x64 and ARM64 (installer and portable ZIP)
 - Android ARM64 (APK)
 
-The fork uses its own Android signing configuration. If no release key is configured,
-the APK uses the build runner's debug key and the \`com.follow.clash.dev\` application ID.
-It cannot update the official Android app in place.
+The Android APK is signed with the fork's release key and uses
+\`com.follow.clash.macc\`. Install it once alongside the official app or the
+earlier debug build, then update it in place with newer MACC releases.
 EOF
 fi
 

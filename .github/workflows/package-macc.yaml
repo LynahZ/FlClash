@@ -9,9 +9,7 @@ on:
         type: string
     secrets:
       KEYSTORE:
-      KEY_ALIAS:
-      STORE_PASSWORD:
-      KEY_PASSWORD:
+      SIGNING_PASSWORD:
 
 permissions:
   contents: read
@@ -20,6 +18,7 @@ env:
   FLUTTER_VERSION: '3.50.0'
   GO_VERSION: '1.27.1'
   NDK_VERSION: r28c
+  MACC_ANDROID_CERT_SHA256: e7e71378783e9aaa5e61a0651aeac37cdcb9e139a3ddb56b83671f7733ab66b3
 
 jobs:
   build:
@@ -125,21 +124,17 @@ jobs:
         if: matrix.platform == 'android'
         env:
           KEYSTORE: ${{ secrets.KEYSTORE }}
-          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
-          STORE_PASSWORD: ${{ secrets.STORE_PASSWORD }}
-          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+          SIGNING_PASSWORD: ${{ secrets.SIGNING_PASSWORD }}
         run: |
-          if [[ -z "$KEYSTORE$KEY_ALIAS$STORE_PASSWORD$KEY_PASSWORD" ]]; then
-            echo 'Using Gradle debug signing and the .dev application ID.'
-            exit 0
-          fi
-          if [[ -z "$KEYSTORE" || -z "$KEY_ALIAS" || -z "$STORE_PASSWORD" || -z "$KEY_PASSWORD" ]]; then
-            echo '::error::Set all four Android signing secrets or leave all of them unset.'
+          if [[ -z "$KEYSTORE" || -z "$SIGNING_PASSWORD" ]]; then
+            echo '::error::Set MACC_ANDROID_KEYSTORE and MACC_ANDROID_KEYSTORE_PASSWORD.'
             exit 1
           fi
+          umask 077
           printf '%s' "$KEYSTORE" | base64 --decode > android/app/keystore.jks
-          printf '\nkeyAlias=%s\nstorePassword=%s\nkeyPassword=%s\n' \
-            "$KEY_ALIAS" "$STORE_PASSWORD" "$KEY_PASSWORD" >> android/local.properties
+          printf '\nkeyAlias=flclash-macc\nstorePassword=%s\nkeyPassword=%s\n' \
+            "$SIGNING_PASSWORD" "$SIGNING_PASSWORD" >> android/local.properties
+          echo "FLCLASH_MACC_ANDROID_VERSION_CODE=$GITHUB_RUN_NUMBER" >> "$GITHUB_ENV"
 
       - name: Install Flutter dependencies
         run: flutter pub get
@@ -156,6 +151,22 @@ jobs:
           ANDROID_NDK_HOME: ${{ steps.ndk.outputs.ndk-path }}
           FLUTTER_MACOS_ARM64_ONLY: ${{ matrix.platform == 'macos' && matrix.arch == 'arm64' }}
         run: dart tool/package.dart ${{ matrix.platform }} --arch ${{ matrix.arch }} --env stable -v
+
+      - name: Verify the Android certificate, application ID and version
+        if: matrix.platform == 'android'
+        run: |
+          sdk_tools=$(find "$ANDROID_HOME/build-tools" -name apksigner -type f | sort -V | tail -n 1)
+          apks=(dist/*.apk)
+          test "${#apks[@]}" = 1
+          signature=$("$sdk_tools" verify --print-certs "${apks[0]}")
+          certificate=$(sed -n 's/^.*certificate SHA-256 digest: //p' <<< "$signature" | sort -u)
+          if [[ "$certificate" != "$MACC_ANDROID_CERT_SHA256" ]]; then
+            echo '::error::The APK signer does not match the pinned MACC release certificate.'
+            exit 1
+          fi
+          metadata=$("${sdk_tools%/*}/aapt2" dump badging "${apks[0]}")
+          grep -F "package: name='com.follow.clash.macc' versionCode='$FLCLASH_MACC_ANDROID_VERSION_CODE'" <<< "$metadata"
+          echo "MACC Android signing certificate: $certificate"
 
       - uses: actions/upload-artifact@v4
         with:
