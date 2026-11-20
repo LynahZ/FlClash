@@ -29,13 +29,17 @@ jq -es --arg revision "$REVISION" --arg version "${UPSTREAM_TAG#v}" '
     (.name | test("^FlClash-[A-Za-z0-9.-]+$") | not) or
     (.sha256 | test("^[a-f0-9]{64}$") | not))
   then error("Unexpected package metadata")
-  else . end
+  else map(. + {release_name: (
+    "FlClash-" + $version + "-" + .os + "-" + .arch +
+    (if .form == null then "" else "-" + .form end) + "." +
+    (.name | split(".") | last)
+  )}) end
 ' "$artifacts"/FlClash-MACC-*/manifest.json > "$dist/packages.json"
 
-while IFS=$'\t' read -r os arch name digest; do
-  cp -- "$artifacts/FlClash-MACC-$os-$arch/$name" "$dist/$name"
-  printf '%s  %s\n' "$digest" "$name"
-done < <(jq -r '.[] | [.os, .arch, .name, .sha256] | @tsv' "$dist/packages.json") > "$dist/SHA256SUMS"
+while IFS=$'\t' read -r os arch name release_name digest; do
+  cp -- "$artifacts/FlClash-MACC-$os-$arch/$name" "$dist/$release_name"
+  printf '%s  %s\n' "$digest" "$release_name"
+done < <(jq -r '.[] | [.os, .arch, .name, .release_name, .sha256] | @tsv' "$dist/packages.json") > "$dist/SHA256SUMS"
 
 (
   cd "$dist"
@@ -80,6 +84,6 @@ fi
 assets=("$dist/SHA256SUMS")
 while IFS= read -r name; do
   assets+=("$dist/$name")
-done < <(jq -r '.[].name' "$dist/packages.json")
+done < <(jq -r '.[].release_name' "$dist/packages.json")
 gh release upload "$tag" --repo "$GH_REPO" --clobber "${assets[@]}"
 gh release edit "$tag" --repo "$GH_REPO" --draft=false --latest
