@@ -165,8 +165,15 @@ jobs:
             exit 1
           fi
           metadata=$("${sdk_tools%/*}/aapt2" dump badging "${apks[0]}")
-          grep -F "package: name='com.follow.clash.macc' versionCode='$FLCLASH_MACC_ANDROID_VERSION_CODE'" <<< "$metadata"
           echo "MACC Android signing certificate: $certificate"
+          package=$(sed -n '/^package: /p' <<< "$metadata")
+          echo "$package"
+          # Flutter's ARM64 split APK adds 2000 to the Gradle version code.
+          expected_version=$((FLCLASH_MACC_ANDROID_VERSION_CODE + 2000))
+          if [[ "$package" != "package: name='com.follow.clash.macc' versionCode='$expected_version'"* ]]; then
+            echo '::error::The APK has an unexpected application ID or version code.'
+            exit 1
+          fi
 
       - uses: actions/upload-artifact@v4
         with:
