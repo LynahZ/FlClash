@@ -1,0 +1,21 @@
+name: Build Android MACC salt import fix
+
+on:
+  push:
+    branches: [ci/android-macc-salt-0.9.4]
+
+permissions:
+  contents: read
+
+jobs:
+  android:
+    if: github.repository == 'LynahZ/FlClash'
+    uses: ./.github/workflows/package-macc.yaml
+    with:
+      revision: 6b09d9c5f22e2f84f54db180f945b4678c6748a5
+      upstream_tag: v0.9.4
+      build_version: 0.9.4+2026111907
+      android_version_code: '2026113907'
+    secrets:
+      KEYSTORE: ${{ secrets.MACC_ANDROID_KEYSTORE }}
+      SIGNING_PASSWORD: ${{ secrets.MACC_ANDROID_KEYSTORE_PASSWORD }}
