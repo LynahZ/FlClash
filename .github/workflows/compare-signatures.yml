@@ -1,0 +1,85 @@
+name: Compare MACC package signatures
+
+on:
+  push:
+    branches: [ci/macc-signature-check]
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  compare:
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - artifact: android-arm64
+            file: android-arm64.apk
+            runner: ubuntu-latest
+          - artifact: macos-arm64
+            file: macos-arm64.dmg
+            runner: macos-26
+          - artifact: macos-amd64
+            file: macos-amd64.dmg
+            runner: macos-26
+          - artifact: windows-amd64
+            file: windows-amd64-setup.exe
+            runner: ubuntu-latest
+          - artifact: windows-arm64
+            file: windows-arm64-setup.exe
+            runner: ubuntu-latest
+    name: Compare ${{ matrix.artifact }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: FlClash-MACC-${{ matrix.artifact }}
+          path: fork
+          github-token: ${{ github.token }}
+          run-id: '44701248748'
+      - name: Fetch official v0.9.4 counterpart
+        env:
+          FILE: ${{ matrix.file }}
+        run: |
+          curl -fsSL --retry 3 -o upstream "https://github.com/chen08209/FlClash/releases/download/v0.9.4/FlClash-dev-0.9.4-$FILE"
+      - name: Inspect APK signature
+        if: matrix.file == 'android-arm64.apk'
+        run: |
+          signer=$(find "$ANDROID_HOME/build-tools" -name apksigner | sort | tail -n 1)
+          echo '=== Official release ==='
+          "$signer" verify --print-certs upstream
+          echo '=== MACC build ==='
+          "$signer" verify --print-certs fork/*.apk
+      - name: Inspect macOS signing authority
+        if: runner.os == 'macOS'
+        run: |
+          mount_dir="$RUNNER_TEMP/flclash-audit"
+          mkdir -p "$mount_dir"
+          mv upstream upstream.dmg
+          for image in upstream.dmg fork/*.dmg; do
+            printf '=== %s ===\n' "$image"
+            hdiutil attach -readonly -nobrowse -mountpoint "$mount_dir" "$image"
+            app="$mount_dir/FlClash.app"
+            codesign -dvvv "$app" 2>&1 | awk '/^Identifier=|^Signature=|^Authority=|^TeamIdentifier=/'
+            hdiutil detach "$mount_dir"
+          done
+      - name: Inspect Windows PE certificate directory
+        if: startsWith(matrix.artifact, 'windows')
+        run: |
+          unzip -q fork/*portable.zip -d portable
+          python3 - <<'PY'
+          import pathlib, struct
+          for path in [pathlib.Path("upstream"), *pathlib.Path("fork").glob("*.exe"),
+                       *pathlib.Path("portable").rglob("*.exe")]:
+              with path.open("rb") as fh:
+                  header = fh.read(65536)
+              pe, = struct.unpack_from("<I", header, 0x3c)
+              assert header[pe:pe+4] == b"PE\0\0", path
+              optional = pe + 24
+              magic, = struct.unpack_from("<H", header, optional)
+              assert magic in (0x10b, 0x20b), path
+              tables = optional + (112 if magic == 0x20b else 96)
+              offset, size = struct.unpack_from("<II", header, tables + 32)
+              print(f"{path}: {'Authenticode present' if offset and size else 'No Authenticode certificate table'}")
+          PY
