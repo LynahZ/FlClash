@@ -55,6 +55,7 @@ const (
 	ZeroTier
 	EasyTier
 	GostRelay
+	Macc
 )
 
 const (
@@ -199,6 +200,8 @@ func (at AdapterType) String() string {
 		return "Shadowsocks"
 	case ShadowsocksR:
 		return "ShadowsocksR"
+	case Macc:
+		return "Macc"
 	case Snell:
 		return "Snell"
 	case Socks5:

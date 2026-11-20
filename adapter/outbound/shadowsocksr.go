@@ -107,6 +107,10 @@ func (ssr *ShadowSocksR) ProxyInfo() C.ProxyInfo {
 }
 
 func NewShadowSocksR(option ShadowSocksROption) (*ShadowSocksR, error) {
+	return newShadowSocksR(option, C.ShadowsocksR)
+}
+
+func newShadowSocksR(option ShadowSocksROption, proxyType C.AdapterType) (*ShadowSocksR, error) {
 	// SSR protocol compatibility
 	// https://github.com/metacubex/mihomo/pull/2056
 	if option.Cipher == "none" {
@@ -161,7 +165,7 @@ func NewShadowSocksR(option ShadowSocksROption) (*ShadowSocksR, error) {
 		Base: NewBase(BaseOption{
 			Name:         option.Name,
 			Addr:         addr,
-			Type:         C.ShadowsocksR,
+			Type:         proxyType,
 			ProviderName: option.ProviderName,
 			UDP:          option.UDP,
 			TFO:          option.TFO,
