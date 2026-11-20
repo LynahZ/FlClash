@@ -57,10 +57,13 @@ if [[ -n "$remote_refs" ]]; then
     echo "::error::$tag already points to $remote_revision instead of $REVISION."
     exit 1
   fi
+else
+  gh api --method POST "repos/$GH_REPO/git/refs" \
+    -f "ref=refs/tags/$tag" -f "sha=$REVISION" > /dev/null
 fi
 
 if [[ -z "$existing" ]]; then
-  gh release create "$tag" --repo "$GH_REPO" --draft --target "$REVISION" \
+  gh release create "$tag" --repo "$GH_REPO" --draft --verify-tag \
     --title "FlClash $UPSTREAM_TAG with MACC" --notes-file - <<EOF
 Based on [upstream FlClash $UPSTREAM_TAG](https://github.com/chen08209/FlClash/releases/tag/$UPSTREAM_TAG).
 Includes MACC support. [GitHub Actions build](https://github.com/$GH_REPO/actions/runs/$SOURCE_RUN).
@@ -73,9 +76,6 @@ The fork uses its own Android signing configuration. If no release key is config
 the APK uses the build runner's debug key and the \`com.follow.clash.dev\` application ID.
 It cannot update the official Android app in place.
 EOF
-elif ! jq -e --arg revision "$REVISION" '.target_commitish == $revision' <<< "$existing" > /dev/null; then
-  echo "::error::The existing $tag draft targets a different revision."
-  exit 1
 fi
 
 assets=("$dist/SHA256SUMS")
