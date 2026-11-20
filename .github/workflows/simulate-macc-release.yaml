@@ -1,0 +1,244 @@
+name: Simulate upstream MACC release
+
+on:
+  push:
+    branches: [ci/macc-e2e-20261120]
+    paths: ['.github/workflows/simulate-macc-release.yaml']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: temporary-macc-simulation
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    if: github.repository == 'LynahZ/FlClash' && github.ref_name == 'ci/macc-e2e-20261120'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      actions: read
+      contents: read
+    outputs:
+      candidate: ${{ steps.merge.outputs.candidate }}
+      revision: ${{ steps.merge.outputs.revision }}
+      upstream_tag: ${{ steps.merge.outputs.tag }}
+      needs_release: ${{ steps.merge.outputs.needs_release }}
+      build_version: ${{ steps.version.outputs.build_version }}
+      android_version_code: ${{ steps.version.outputs.android_version_code }}
+    env:
+      GIT_AUTHOR_NAME: github-actions[bot]
+      GIT_AUTHOR_EMAIL: 41898282+github-actions[bot]@users.noreply.github.com
+      GIT_COMMITTER_NAME: github-actions[bot]
+      GIT_COMMITTER_EMAIL: 41898282+github-actions[bot]@users.noreply.github.com
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Merge upstream release and its pinned core
+        id: merge
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag=v0.9.4
+          if [[ ! $tag =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::The latest upstream release has an unexpected tag."
+            exit 1
+          fi
+          git fetch --no-tags https://github.com/chen08209/FlClash.git "refs/tags/$tag"
+          upstream=$(git rev-parse 'FETCH_HEAD^{commit}')
+          base=$(git rev-parse HEAD)
+          core=core/Clash.Meta
+          git submodule update --init -- "$core"
+          upstream_core=$(git rev-parse "$upstream:$core")
+          git -C "$core" worktree add --detach "$RUNNER_TEMP/sim-upstream-core" "$upstream_core"
+          git -C "$RUNNER_TEMP/sim-upstream-core" commit --allow-empty -m 'chore: simulate an upstream core revision'
+          next_core=$(git -C "$RUNNER_TEMP/sim-upstream-core" rev-parse HEAD)
+          git switch --detach "$upstream"
+          cat > .github/workflows/simulated-upstream-change.yml <<'YAML'
+          name: Simulated upstream workflow update
+          on: workflow_dispatch
+          jobs:
+            check:
+              runs-on: ubuntu-latest
+              steps:
+                - run: echo upstream workflow update
+          YAML
+          git add .github/workflows/simulated-upstream-change.yml
+          git update-index --cacheinfo "160000,$next_core,$core"
+          git commit -m 'chore: simulate upstream release changing Actions and core'
+          release=$(git rev-parse HEAD)
+          git switch --detach "$base"
+          export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=protocol.file.allow GIT_CONFIG_VALUE_0=always
+          bash .github/scripts/prepare-upstream-sync.sh "$release" "$tag" \
+            "$RUNNER_TEMP/sim-upstream-core" "$RUNNER_TEMP/upstream-sync"
+          git merge-base --is-ancestor "$release" HEAD
+          git -C "$core" merge-base --is-ancestor "$next_core" HEAD
+          test -f .github/workflows/simulated-upstream-change.yml
+          test -f "$RUNNER_TEMP/upstream-sync/core.bundle"
+          if [[ -f "$RUNNER_TEMP/upstream-sync/application.bundle" ]]; then
+            echo 'candidate=true' >> "$GITHUB_OUTPUT"
+          fi
+          echo "revision=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo 'needs_release=true' >> "$GITHUB_OUTPUT"
+
+      - uses: actions/setup-go@v5
+        if: steps.merge.outputs.candidate == 'true' || steps.merge.outputs.needs_release == 'true' || github.event_name != 'schedule'
+        with:
+          go-version-file: core/go.mod
+          cache-dependency-path: core/go.sum
+
+      - name: Verify MACC and run core tests
+        if: steps.merge.outputs.candidate == 'true' || steps.merge.outputs.needs_release == 'true' || github.event_name != 'schedule'
+        working-directory: core
+        env:
+          CGO_ENABLED: '0'
+        run: |
+          git submodule update --init -- Clash.Meta
+          go test -json . > "$RUNNER_TEMP/core-test.json" || {
+            cat "$RUNNER_TEMP/core-test.json"
+            exit 1
+          }
+          jq -e -s '([.[] | select(.Action == "pass") | .Test]) as $passed
+            | ["TestLoadMaccProfile", "TestMaccSaltAndMalformedAddress", "TestMaccUDPRoundTrip"]
+            | all(. as $test | $passed | index($test) != null)' "$RUNNER_TEMP/core-test.json"
+
+      - name: Read the upstream version name and code from the ARM64 APK
+        id: version
+        if: >-
+          !false &&
+          (steps.merge.outputs.candidate == 'true' || steps.merge.outputs.needs_release == 'true' ||
+            false || github.event_name == 'push')
+        env:
+          GH_TOKEN: ${{ github.token }}
+          UPSTREAM_TAG: ${{ steps.merge.outputs.tag }}
+        run: |
+          version=${UPSTREAM_TAG#v}
+          url=$(gh api "repos/chen08209/FlClash/releases/tags/$UPSTREAM_TAG" |
+            jq -r --arg version "$version" '
+              .assets as $assets |
+              first([
+                "FlClash-\($version)-android-arm64.apk",
+                "FlClash-dev-\($version)-android-arm64.apk",
+                "FlClash-\($version)-android-arm64-v8a.apk"
+              ][] as $name | $assets[] | select(.name == $name) | .browser_download_url)
+            ')
+          if [[ -z "$url" ]]; then
+            echo "::error::No upstream ARM64 APK found for $UPSTREAM_TAG."
+            exit 1
+          fi
+          apk="$RUNNER_TEMP/upstream-arm64.apk"
+          curl -fsSL --retry 3 -o "$apk" "$url"
+          aapt=$(find "$ANDROID_HOME/build-tools" -name aapt2 -type f | sort -V | tail -n 1)
+          metadata=$("$aapt" dump badging "$apk")
+          package=$(sed -n '/^package: /p' <<< "$metadata")
+          upstream_code=$(sed -n "s/^package: .* versionCode='\([0-9]\{1,10\}\)' .*/\1/p" <<< "$package")
+          if [[ "$package" != *" versionName='$version'"* || ! "$upstream_code" =~ ^[1-9][0-9]{0,9}$ ]] ||
+            ((upstream_code <= 2000 || upstream_code > 2100000000)); then
+            echo "::error::Unexpected Android version metadata in the upstream $UPSTREAM_TAG APK."
+            exit 1
+          fi
+          echo "$package"
+          # Flutter's ARM64 split adds 2000 to the common build number.
+          echo "build_version=$version+$((upstream_code - 2000))" >> "$GITHUB_OUTPUT"
+          echo "android_version_code=$upstream_code" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/upload-artifact@v4
+        if: steps.merge.outputs.candidate == 'true' && !false
+        with:
+          name: upstream-sync-bundles
+          path: ${{ runner.temp }}/upstream-sync/*.bundle
+          if-no-files-found: error
+          retention-days: 1
+
+  publish:
+    needs: prepare
+    if: needs.prepare.outputs.candidate == 'true' && !false
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ci/macc-e2e-20261120
+          fetch-depth: 0
+          token: ${{ secrets.UPSTREAM_SYNC_TOKEN }}
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: upstream-sync-bundles
+          path: ${{ runner.temp }}/upstream-sync
+
+      - name: Publish the validated app and core commits atomically
+        env:
+          DEFAULT_BRANCH: ci/macc-e2e-20261120
+          HAS_SYNC_TOKEN: ${{ secrets.UPSTREAM_SYNC_TOKEN != '' }}
+        run: |
+          bundles="$RUNNER_TEMP/upstream-sync"
+          git fetch --no-tags "$bundles/application.bundle" HEAD:refs/sync/application
+          if [[ "$HAS_SYNC_TOKEN" != true ]] &&
+            ! git diff --quiet HEAD refs/sync/application -- .github/workflows; then
+            echo "::error::The release changes workflows. Set UPSTREAM_SYNC_TOKEN with Contents and Workflows write access to this fork."
+            exit 1
+          fi
+          refs=("refs/sync/application:refs/heads/$DEFAULT_BRANCH")
+          if [[ -f "$bundles/core.bundle" ]]; then
+            git fetch --no-tags "$bundles/core.bundle" HEAD:refs/sync/core
+            refs+=(refs/sync/core:refs/heads/ci/macc-e2e-core-20261120)
+          fi
+          git push --atomic origin "${refs[@]}"
+          remote=$(git ls-remote --refs origin "refs/heads/$DEFAULT_BRANCH" refs/heads/ci/macc-e2e-core-20261120)
+          grep -Fx "$(git rev-parse refs/sync/application)"$'\t'"refs/heads/$DEFAULT_BRANCH" <<< "$remote"
+          grep -Fx "$(git rev-parse refs/sync/core)"$'\t'refs/heads/ci/macc-e2e-core-20261120 <<< "$remote"
+
+  package:
+    needs: [prepare, publish]
+    if: >-
+      !cancelled() && !false && needs.prepare.result == 'success' &&
+      (needs.publish.result == 'success' ||
+        (needs.prepare.outputs.candidate != 'true' &&
+          (needs.prepare.outputs.needs_release == 'true' || false || github.event_name == 'push')))
+    uses: ./.github/workflows/package-macc.yaml
+    with:
+      revision: ${{ needs.prepare.outputs.revision }}
+      upstream_tag: ${{ needs.prepare.outputs.upstream_tag }}
+      build_version: ${{ needs.prepare.outputs.build_version }}
+      android_version_code: ${{ needs.prepare.outputs.android_version_code }}
+    secrets:
+      KEYSTORE: ${{ secrets.MACC_ANDROID_KEYSTORE }}
+      SIGNING_PASSWORD: ${{ secrets.MACC_ANDROID_KEYSTORE_PASSWORD }}
+
+  release:
+    needs: [prepare, package]
+    if: >-
+      !cancelled() && needs.package.result == 'success' && needs.prepare.outputs.needs_release == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          sparse-checkout: .github/scripts/publish-macc-e2e-release.sh
+          sparse-checkout-cone-mode: false
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: FlClash-MACC-*
+          path: ${{ runner.temp }}/macc-artifacts
+
+      - name: Publish verified installation packages to the fork
+        env:
+          GH_TOKEN: ${{ secrets.UPSTREAM_SYNC_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          UPSTREAM_TAG: ${{ needs.prepare.outputs.upstream_tag }}
+          REVISION: ${{ needs.prepare.outputs.revision }}
+          SOURCE_RUN: ${{ github.run_id }}
+        run: |
+          bash .github/scripts/publish-macc-e2e-release.sh "$RUNNER_TEMP/macc-artifacts" "$RUNNER_TEMP/macc-release"

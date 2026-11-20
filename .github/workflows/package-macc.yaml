@@ -40,7 +40,7 @@ jobs:
         include:
           - platform: macos
             arch: arm64
-            runner: macos-26
+            runner: macos-latest
           - platform: windows
             arch: amd64
             runner: windows-2022
@@ -193,6 +193,30 @@ jobs:
             echo '::error::The APK has an unexpected application ID or version code.'
             exit 1
           fi
+
+      - name: Verify the macOS app version fields
+        if: matrix.platform == 'macos'
+        env:
+          BUILD_VERSION: ${{ inputs.build_version }}
+        run: |
+          plist=build/macos/Build/Products/Release/FlClash.app/Contents/Info.plist
+          name=$(/usr/libexec/PlistBuddy -c 'Print CFBundleShortVersionString' "$plist")
+          code=$(/usr/libexec/PlistBuddy -c 'Print CFBundleVersion' "$plist")
+          echo "macOS version: $name+$code"
+          test "$name+$code" = "$BUILD_VERSION"
+
+      - name: Verify the Windows executable version string
+        if: matrix.platform == 'windows'
+        shell: pwsh
+        env:
+          BUILD_VERSION: ${{ inputs.build_version }}
+        run: |
+          $portable = Get-ChildItem dist/*portable.zip
+          Expand-Archive -LiteralPath $portable.FullName -DestinationPath "$env:RUNNER_TEMP/version-check"
+          $app = Get-ChildItem "$env:RUNNER_TEMP/version-check" -Recurse -Filter FlClash.exe
+          $version = $app.VersionInfo.ProductVersion
+          Write-Output "$($app.Name) ProductVersion=$version"
+          if ($version -ne $env:BUILD_VERSION) { throw "Unexpected ProductVersion: $version" }
 
       - uses: actions/upload-artifact@v4
         with:

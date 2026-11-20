@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - '**'
+      - '!ci/macc-e2e-*'
     tags:
       - 'v*'
   workflow_dispatch:
