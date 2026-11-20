@@ -326,6 +326,7 @@ const _openvpnCiphers = [
 const _proxyTypes = [
   'ss',
   'ssr',
+  'macc',
   'vmess',
   'vless',
   'trojan',
@@ -666,6 +667,32 @@ const _tlsLayerOpts = {
   'restls-script': _str,
 };
 
+const _ssrProxyFields = {
+  ..._server,
+  'udp': _bool,
+  ..._tcpDial,
+  'cipher': YamlSchema.scalar(_streamCiphers),
+  'password': _str,
+  'obfs': YamlSchema.scalar([
+    'plain',
+    'http_simple',
+    'http_post',
+    'random_head',
+    'tls1.2_ticket_auth',
+    'tls1.2_ticket_fastauth',
+  ]),
+  'obfs-param': _str,
+  'protocol': YamlSchema.scalar([
+    'origin',
+    'auth_sha1_v4',
+    'auth_aes128_md5',
+    'auth_aes128_sha1',
+    'auth_chain_a',
+    'auth_chain_b',
+  ]),
+  'protocol-param': _str,
+};
+
 const _proxyVariants = <String, Map<String, YamlSchema>>{
   'ss': {
     ..._server,
@@ -711,31 +738,8 @@ const _proxyVariants = <String, Map<String, YamlSchema>>{
     }),
     'smux': _smux,
   },
-  'ssr': {
-    ..._server,
-    'udp': _bool,
-    ..._tcpDial,
-    'cipher': YamlSchema.scalar(_streamCiphers),
-    'password': _str,
-    'obfs': YamlSchema.scalar([
-      'plain',
-      'http_simple',
-      'http_post',
-      'random_head',
-      'tls1.2_ticket_auth',
-      'tls1.2_ticket_fastauth',
-    ]),
-    'obfs-param': _str,
-    'protocol': YamlSchema.scalar([
-      'origin',
-      'auth_sha1_v4',
-      'auth_aes128_md5',
-      'auth_aes128_sha1',
-      'auth_chain_a',
-      'auth_chain_b',
-    ]),
-    'protocol-param': _str,
-  },
+  'ssr': _ssrProxyFields,
+  'macc': {..._ssrProxyFields, 'obfsparam': _str, 'protocolparam': _str},
   'vmess': {
     ..._server,
     'udp': _bool,

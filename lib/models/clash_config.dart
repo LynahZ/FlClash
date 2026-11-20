@@ -242,6 +242,7 @@ extension ProxyExt on Proxy {
 const customProxyTypes = [
   'ss',
   'ssr',
+  'macc',
   'socks5',
   'http',
   'vmess',
@@ -398,7 +399,14 @@ extension CustomProxyExt on CustomProxy {
 
   Set<String> get requiredKeys => switch (type) {
     'ss' => const {'server', 'port', 'password', 'cipher'},
-    'ssr' => const {'server', 'port', 'password', 'cipher', 'obfs', 'protocol'},
+    'ssr' || 'macc' => const {
+      'server',
+      'port',
+      'password',
+      'cipher',
+      'obfs',
+      'protocol',
+    },
     'vmess' => const {'server', 'port', 'uuid', 'alterId', 'cipher'},
     'vless' => const {'server', 'port', 'uuid'},
     'snell' => const {'server', 'port', 'psk'},
@@ -424,7 +432,7 @@ extension CustomProxyExt on CustomProxy {
   /// The rows the form always shows: the credentials and [requiredKeys].
   List<ProxyField> get fields => switch (type) {
     'ss' => const [ProxyField.cipher, ProxyField.password],
-    'ssr' => const [
+    'ssr' || 'macc' => const [
       ProxyField.cipher,
       ProxyField.protocol,
       ProxyField.obfs,
@@ -608,7 +616,8 @@ extension CustomProxyExt on CustomProxy {
       ProxyField.pluginMux ||
       ProxyField.pluginSkipCertVerify =>
         type == 'ss' && _pluginReads(field.path.last),
-      ProxyField.protocolParam || ProxyField.obfsParam => type == 'ssr',
+      ProxyField.protocolParam ||
+      ProxyField.obfsParam => type == 'ssr' || type == 'macc',
       ProxyField.obfsMode ||
       ProxyField.obfsHost ||
       ProxyField.version => type == 'snell',
@@ -686,7 +695,7 @@ extension CustomProxyExt on CustomProxy {
   List<String> choicesOf(ProxyField field) => switch (field) {
     ProxyField.cipher => switch (type) {
       'ss' => _ssCiphers,
-      'ssr' => _ssrCiphers,
+      'ssr' || 'macc' => _ssrCiphers,
       'vmess' => const [
         'auto',
         'aes-128-gcm',
@@ -698,7 +707,7 @@ extension CustomProxyExt on CustomProxy {
       _ => const [],
     },
     ProxyField.protocol => switch (type) {
-      'ssr' => const [
+      'ssr' || 'macc' => const [
         'origin',
         'auth_sha1_v4',
         'auth_aes128_md5',
@@ -710,7 +719,7 @@ extension CustomProxyExt on CustomProxy {
       _ => const [],
     },
     ProxyField.obfs => switch (type) {
-      'ssr' => const [
+      'ssr' || 'macc' => const [
         'plain',
         'http_simple',
         'http_post',

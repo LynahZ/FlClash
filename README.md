@@ -81,6 +81,10 @@ and `flclash://` schemes work the same way.
 clash://install-config?url=<URL-encoded subscription link>
 ```
 
+**MACC subscriptions.** Create a `macc.salt` file containing the subscription provider's MACC salt in the core
+configuration directory next to `config.yaml`, then import or reapply the subscription. The `MIHOMO_MACC_SALT`
+environment variable takes precedence when running the core from a terminal.
+
 **Automate on Android.** Tasker, MacroDroid and similar apps can start, stop or toggle the proxy by starting an
 activity with one of these actions:
 

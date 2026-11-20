@@ -1,0 +1,122 @@
+name: Sync upstream stable release
+
+on:
+  schedule:
+    - cron: '23 * * * *'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Validate the merge without publishing
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: upstream-stable-sync
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    if: github.repository == 'LynahZ/FlClash' && github.ref_name == github.event.repository.default_branch
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    outputs:
+      candidate: ${{ steps.merge.outputs.candidate }}
+    env:
+      GIT_AUTHOR_NAME: github-actions[bot]
+      GIT_AUTHOR_EMAIL: 41898282+github-actions[bot]@users.noreply.github.com
+      GIT_COMMITTER_NAME: github-actions[bot]
+      GIT_COMMITTER_EMAIL: 41898282+github-actions[bot]@users.noreply.github.com
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Merge upstream release and its pinned core
+        id: merge
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag=$(gh api repos/chen08209/FlClash/releases/latest \
+            --jq 'select(.draft == false and .prerelease == false) | .tag_name')
+          if [[ ! $tag =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::The latest upstream release has an unexpected tag."
+            exit 1
+          fi
+          git fetch --no-tags https://github.com/chen08209/FlClash.git "refs/tags/$tag"
+          release=$(git rev-parse 'FETCH_HEAD^{commit}')
+          bash .github/scripts/prepare-upstream-sync.sh "$release" "$tag" \
+            https://github.com/chen08209/Clash.Meta.git "$RUNNER_TEMP/upstream-sync"
+          if [[ -f "$RUNNER_TEMP/upstream-sync/application.bundle" ]]; then
+            echo 'candidate=true' >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/setup-go@v5
+        if: steps.merge.outputs.candidate == 'true' || github.event_name == 'workflow_dispatch'
+        with:
+          go-version-file: core/go.mod
+          cache-dependency-path: core/go.sum
+
+      - name: Verify MACC and run core tests
+        if: steps.merge.outputs.candidate == 'true' || github.event_name == 'workflow_dispatch'
+        working-directory: core
+        env:
+          CGO_ENABLED: '0'
+        run: |
+          git submodule update --init -- Clash.Meta
+          go test -json . > "$RUNNER_TEMP/core-test.json" || {
+            cat "$RUNNER_TEMP/core-test.json"
+            exit 1
+          }
+          jq -e -s '([.[] | select(.Action == "pass") | .Test]) as $passed
+            | ["TestLoadMaccProfile", "TestMaccSaltAndMalformedAddress", "TestMaccUDPRoundTrip"]
+            | all(. as $test | $passed | index($test) != null)' "$RUNNER_TEMP/core-test.json"
+
+      - uses: actions/upload-artifact@v4
+        if: steps.merge.outputs.candidate == 'true' && !inputs.dry_run
+        with:
+          name: upstream-sync-bundles
+          path: ${{ runner.temp }}/upstream-sync/*.bundle
+          if-no-files-found: error
+          retention-days: 1
+
+  publish:
+    needs: prepare
+    if: needs.prepare.outputs.candidate == 'true' && !inputs.dry_run
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          fetch-depth: 0
+          token: ${{ secrets.UPSTREAM_SYNC_TOKEN || github.token }}
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: upstream-sync-bundles
+          path: ${{ runner.temp }}/upstream-sync
+
+      - name: Publish the validated app and core commits atomically
+        env:
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          HAS_SYNC_TOKEN: ${{ secrets.UPSTREAM_SYNC_TOKEN != '' }}
+        run: |
+          bundles="$RUNNER_TEMP/upstream-sync"
+          git fetch --no-tags "$bundles/application.bundle" HEAD:refs/sync/application
+          if [[ "$HAS_SYNC_TOKEN" != true ]] &&
+            ! git diff --quiet HEAD refs/sync/application -- .github/workflows; then
+            echo "::error::The release changes workflows. Set UPSTREAM_SYNC_TOKEN with Contents and Workflows write access to this fork."
+            exit 1
+          fi
+          refs=("refs/sync/application:refs/heads/$DEFAULT_BRANCH")
+          if [[ -f "$bundles/core.bundle" ]]; then
+            git fetch --no-tags "$bundles/core.bundle" HEAD:refs/sync/core
+            refs+=(refs/sync/core:refs/heads/macc-core)
+          fi
+          git push --atomic origin "${refs[@]}"
