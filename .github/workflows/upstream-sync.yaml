@@ -6,6 +6,7 @@ on:
   push:
     branches: [main]
     paths:
+      - '.github/workflows/upstream-sync.yaml'
       - '.github/workflows/package-macc.yaml'
       - '.github/scripts/publish-macc-release.sh'
   workflow_dispatch:
@@ -110,16 +111,23 @@ jobs:
           UPSTREAM_TAG: ${{ steps.merge.outputs.tag }}
         run: |
           version=${UPSTREAM_TAG#v}
-          apk_dir=$(mktemp -d)
-          gh release download "$UPSTREAM_TAG" --repo chen08209/FlClash \
-            --pattern "FlClash-*-$version-android-arm64.apk" --dir "$apk_dir"
-          apks=("$apk_dir"/*.apk)
-          if [[ ${#apks[@]} != 1 || ! -f "${apks[0]}" ]]; then
-            echo "::error::Expected exactly one upstream ARM64 APK."
+          url=$(gh api "repos/chen08209/FlClash/releases/tags/$UPSTREAM_TAG" |
+            jq -r --arg version "$version" '
+              .assets as $assets |
+              first([
+                "FlClash-\($version)-android-arm64.apk",
+                "FlClash-dev-\($version)-android-arm64.apk",
+                "FlClash-\($version)-android-arm64-v8a.apk"
+              ][] as $name | $assets[] | select(.name == $name) | .browser_download_url)
+            ')
+          if [[ -z "$url" ]]; then
+            echo "::error::No upstream ARM64 APK found for $UPSTREAM_TAG."
             exit 1
           fi
+          apk="$RUNNER_TEMP/upstream-arm64.apk"
+          curl -fsSL --retry 3 -o "$apk" "$url"
           aapt=$(find "$ANDROID_HOME/build-tools" -name aapt2 -type f | sort -V | tail -n 1)
-          metadata=$("$aapt" dump badging "${apks[0]}")
+          metadata=$("$aapt" dump badging "$apk")
           package=$(sed -n '/^package: /p' <<< "$metadata")
           upstream_code=$(sed -n "s/^package: .* versionCode='\([0-9]\{1,10\}\)' .*/\1/p" <<< "$package")
           if [[ "$package" != *" versionName='$version'"* || ! "$upstream_code" =~ ^[1-9][0-9]{0,9}$ ]] ||
