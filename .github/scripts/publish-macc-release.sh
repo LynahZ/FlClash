@@ -26,7 +26,7 @@ jq -es --arg revision "$REVISION" --arg version "${UPSTREAM_TAG#v}" '
   elif (map(.name) | unique | length) != length
   then error("More than one package has the same filename")
   elif any(.[]; .commit != $revision or
-    (.version != $version and (.version | startswith($version + "-") | not)) or
+    .version != $version or
     (.name | test("^FlClash-[A-Za-z0-9.-]+$") | not) or
     (.sha256 | test("^[a-f0-9]{64}$") | not))
   then error("Unexpected package metadata")

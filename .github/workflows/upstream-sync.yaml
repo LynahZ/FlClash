@@ -39,8 +39,8 @@ jobs:
       revision: ${{ steps.merge.outputs.revision }}
       upstream_tag: ${{ steps.merge.outputs.tag }}
       needs_release: ${{ steps.merge.outputs.needs_release }}
-      previous_run: ${{ steps.reuse.outputs.run }}
-      previous_revision: ${{ steps.reuse.outputs.revision }}
+      build_version: ${{ steps.version.outputs.build_version }}
+      android_version_code: ${{ steps.version.outputs.android_version_code }}
     env:
       GIT_AUTHOR_NAME: github-actions[bot]
       GIT_AUTHOR_EMAIL: 41898282+github-actions[bot]@users.noreply.github.com
@@ -72,40 +72,11 @@ jobs:
           fi
           echo "revision=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
-          echo "upstream_revision=$release" >> "$GITHUB_OUTPUT"
           published=$(gh api --paginate "repos/$GITHUB_REPOSITORY/releases" \
             --jq ".[] | select(.tag_name == \"$tag-macc\" and .draft == false) | .id")
           if [[ -z "$published" ]]; then
             echo 'needs_release=true' >> "$GITHUB_OUTPUT"
           fi
-
-      - name: Find a completed build for the same upstream release
-        id: reuse
-        if: >-
-          github.event_name == 'push' && steps.merge.outputs.needs_release == 'true' &&
-          steps.merge.outputs.candidate != 'true'
-        env:
-          GH_TOKEN: ${{ github.token }}
-          UPSTREAM_TAG: ${{ steps.merge.outputs.tag }}
-          UPSTREAM_REVISION: ${{ steps.merge.outputs.upstream_revision }}
-        run: |
-          runs=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/upstream-sync.yaml/runs?branch=$GITHUB_REF_NAME&status=success&per_page=30" \
-            --jq '.workflow_runs[] | [.id, .head_sha] | @tsv')
-          while IFS=$'\t' read -r run revision; do
-            [[ -n "$run" ]] || continue
-            git merge-base --is-ancestor "$revision" HEAD || continue
-            git merge-base --is-ancestor "$UPSTREAM_REVISION" "$revision" || continue
-            version=$(git show "$revision:pubspec.yaml" | sed -n 's/^version: \([^+]*\).*/\1/p')
-            [[ "$version" == "${UPSTREAM_TAG#v}" ]] || continue
-            git grep -Fq 'Verify the Android certificate, application ID and version' "$revision" -- .github/workflows/package-macc.yaml || continue
-            artifacts=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run/artifacts" \
-              --jq '[.artifacts[] | select(.expired == false and (.name | startswith("FlClash-MACC-")))] | length')
-            if [[ "$artifacts" == 5 ]]; then
-              echo "run=$run" >> "$GITHUB_OUTPUT"
-              echo "revision=$revision" >> "$GITHUB_OUTPUT"
-              break
-            fi
-          done <<< "$runs"
 
       - uses: actions/setup-go@v5
         if: steps.merge.outputs.candidate == 'true' || steps.merge.outputs.needs_release == 'true' || github.event_name != 'schedule'
@@ -127,6 +98,39 @@ jobs:
           jq -e -s '([.[] | select(.Action == "pass") | .Test]) as $passed
             | ["TestLoadMaccProfile", "TestMaccSaltAndMalformedAddress", "TestMaccUDPRoundTrip"]
             | all(. as $test | $passed | index($test) != null)' "$RUNNER_TEMP/core-test.json"
+
+      - name: Read the upstream version name and code from the ARM64 APK
+        id: version
+        if: >-
+          !inputs.dry_run &&
+          (steps.merge.outputs.candidate == 'true' || steps.merge.outputs.needs_release == 'true' ||
+            inputs.package_current || github.event_name == 'push')
+        env:
+          GH_TOKEN: ${{ github.token }}
+          UPSTREAM_TAG: ${{ steps.merge.outputs.tag }}
+        run: |
+          version=${UPSTREAM_TAG#v}
+          apk_dir=$(mktemp -d)
+          gh release download "$UPSTREAM_TAG" --repo chen08209/FlClash \
+            --pattern "FlClash-*-$version-android-arm64.apk" --dir "$apk_dir"
+          apks=("$apk_dir"/*.apk)
+          if [[ ${#apks[@]} != 1 || ! -f "${apks[0]}" ]]; then
+            echo "::error::Expected exactly one upstream ARM64 APK."
+            exit 1
+          fi
+          aapt=$(find "$ANDROID_HOME/build-tools" -name aapt2 -type f | sort -V | tail -n 1)
+          metadata=$("$aapt" dump badging "${apks[0]}")
+          package=$(sed -n '/^package: /p' <<< "$metadata")
+          upstream_code=$(sed -n "s/^package: .* versionCode='\([0-9]\{1,10\}\)' .*/\1/p" <<< "$package")
+          if [[ "$package" != *" versionName='$version'"* || ! "$upstream_code" =~ ^[1-9][0-9]{0,9}$ ]] ||
+            ((upstream_code <= 2000 || upstream_code > 2100000000)); then
+            echo "::error::Unexpected Android version metadata in the upstream $UPSTREAM_TAG APK."
+            exit 1
+          fi
+          echo "$package"
+          # Flutter's ARM64 split adds 2000 to the common build number.
+          echo "build_version=$version+$((upstream_code - 2000))" >> "$GITHUB_OUTPUT"
+          echo "android_version_code=$upstream_code" >> "$GITHUB_OUTPUT"
 
       - uses: actions/upload-artifact@v4
         if: steps.merge.outputs.candidate == 'true' && !inputs.dry_run
@@ -178,13 +182,15 @@ jobs:
     needs: [prepare, publish]
     if: >-
       !cancelled() && !inputs.dry_run && needs.prepare.result == 'success' &&
-      needs.prepare.outputs.previous_run == '' &&
       (needs.publish.result == 'success' ||
         (needs.prepare.outputs.candidate != 'true' &&
           (needs.prepare.outputs.needs_release == 'true' || inputs.package_current || github.event_name == 'push')))
     uses: ./.github/workflows/package-macc.yaml
     with:
       revision: ${{ needs.prepare.outputs.revision }}
+      upstream_tag: ${{ needs.prepare.outputs.upstream_tag }}
+      build_version: ${{ needs.prepare.outputs.build_version }}
+      android_version_code: ${{ needs.prepare.outputs.android_version_code }}
     secrets:
       KEYSTORE: ${{ secrets.MACC_ANDROID_KEYSTORE }}
       SIGNING_PASSWORD: ${{ secrets.MACC_ANDROID_KEYSTORE_PASSWORD }}
@@ -192,13 +198,10 @@ jobs:
   release:
     needs: [prepare, package]
     if: >-
-      !cancelled() && !inputs.dry_run && needs.prepare.result == 'success' &&
-      needs.prepare.outputs.needs_release == 'true' &&
-      (needs.package.result == 'success' || needs.prepare.outputs.previous_run != '')
+      !cancelled() && needs.package.result == 'success' && needs.prepare.outputs.needs_release == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
-      actions: read
       contents: write
     steps:
       - uses: actions/checkout@v4
@@ -211,15 +214,13 @@ jobs:
         with:
           pattern: FlClash-MACC-*
           path: ${{ runner.temp }}/macc-artifacts
-          github-token: ${{ github.token }}
-          run-id: ${{ needs.prepare.outputs.previous_run || github.run_id }}
 
       - name: Publish verified installation packages to the fork
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
           UPSTREAM_TAG: ${{ needs.prepare.outputs.upstream_tag }}
-          REVISION: ${{ needs.prepare.outputs.previous_revision || needs.prepare.outputs.revision }}
-          SOURCE_RUN: ${{ needs.prepare.outputs.previous_run || github.run_id }}
+          REVISION: ${{ needs.prepare.outputs.revision }}
+          SOURCE_RUN: ${{ github.run_id }}
         run: |
           bash .github/scripts/publish-macc-release.sh "$RUNNER_TEMP/macc-artifacts" "$RUNNER_TEMP/macc-release"
