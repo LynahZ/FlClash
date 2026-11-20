@@ -1137,5 +1137,8 @@
   "coreRunningDesc": "앱이 코어에 연결되어 있습니다",
   "forceRestartCore": "강제 다시 시작",
   "vpnPermissionNotGranted": "VPN 권한이 허용되지 않아 VPN을 시작하지 않았습니다. 다른 앱이 상시 사용 VPN으로 설정되어 있어도 시작할 수 없습니다.",
-  "vpnServiceStartFailed": "VPN 서비스를 시작하지 못했습니다."
+  "vpnServiceStartFailed": "VPN 서비스를 시작하지 못했습니다.",
+  "importMaccSalt": "MACC 솔트 파일 가져오기",
+  "maccSaltImported": "MACC 솔트를 저장했습니다. 구독을 다시 적용한 후 재연결하세요.",
+  "maccSaltImportFailed": "구독 제공업체의 유효한 macc.salt 파일을 선택하세요."
 }

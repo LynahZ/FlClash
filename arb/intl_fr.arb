@@ -1137,5 +1137,8 @@
   "coreRunningDesc": "L’application est connectée au cœur",
   "forceRestartCore": "Forcer le redémarrage",
   "vpnPermissionNotGranted": "L'autorisation VPN n'a pas été accordée, le VPN n'a donc pas démarré. Un VPN permanent défini pour une autre application l'empêche aussi.",
-  "vpnServiceStartFailed": "Le service VPN n'a pas pu démarrer."
+  "vpnServiceStartFailed": "Le service VPN n'a pas pu démarrer.",
+  "importMaccSalt": "Importer le fichier de sel MACC",
+  "maccSaltImported": "Sel MACC enregistré. Réappliquez l’abonnement et reconnectez-vous.",
+  "maccSaltImportFailed": "Sélectionnez un fichier macc.salt valide fourni par votre service d’abonnement."
 }

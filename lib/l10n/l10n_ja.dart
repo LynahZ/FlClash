@@ -3777,4 +3777,13 @@ class AppLocalizationsJa extends AppLocalizations {
 
   @override
   String get vpnServiceStartFailed => 'VPN サービスを起動できませんでした。';
+
+  @override
+  String get importMaccSalt => 'MACC ソルトファイルをインポート';
+
+  @override
+  String get maccSaltImported => 'MACC ソルトを保存しました。サブスクリプションを再適用して再接続してください。';
+
+  @override
+  String get maccSaltImportFailed => '契約先から提供された有効な macc.salt ファイルを選択してください。';
 }

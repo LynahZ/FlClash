@@ -3728,4 +3728,13 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get vpnServiceStartFailed => 'VPN 服务无法启动。';
+
+  @override
+  String get importMaccSalt => '导入 MACC 盐值文件';
+
+  @override
+  String get maccSaltImported => 'MACC 盐值已保存。请重新应用订阅并重新连接。';
+
+  @override
+  String get maccSaltImportFailed => '请选择订阅服务商提供的有效 macc.salt 文件。';
 }

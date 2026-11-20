@@ -78,6 +78,7 @@ clash://install-config?url=<经过 URL 编码的订阅链接>
 
 **MACC 订阅。** 在内核配置目录（`config.yaml` 所在目录）创建仅包含订阅服务商 MACC 盐值的 `macc.salt` 文件，
 再导入或重新应用订阅。通过终端启动内核时也可以设置 `MIHOMO_MACC_SALT`，环境变量优先。
+在 Android 上，从「工具 → 导入 MACC 盐值文件」选择 `macc.salt`，然后重新应用订阅并连接。
 
 **Fork 同步。** `Sync upstream stable release` 每小时第 23 分钟查看上游最新的正式 Release，也支持手动运行和只验证。
 同步按 Release 标签合入应用，并把该版本固定的内核提交合入本 fork 的 `macc-core` 分支。Go 测试（含 MACC）通过后，

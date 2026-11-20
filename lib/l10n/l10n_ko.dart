@@ -3852,4 +3852,13 @@ class AppLocalizationsKo extends AppLocalizations {
 
   @override
   String get vpnServiceStartFailed => 'VPN 서비스를 시작하지 못했습니다.';
+
+  @override
+  String get importMaccSalt => 'MACC 솔트 파일 가져오기';
+
+  @override
+  String get maccSaltImported => 'MACC 솔트를 저장했습니다. 구독을 다시 적용한 후 재연결하세요.';
+
+  @override
+  String get maccSaltImportFailed => '구독 제공업체의 유효한 macc.salt 파일을 선택하세요.';
 }
