@@ -7,6 +7,7 @@ on:
     branches: [main]
     paths:
       - '.github/workflows/package-macc.yaml'
+      - '.github/scripts/publish-macc-release.sh'
   workflow_dispatch:
     inputs:
       dry_run:
@@ -30,9 +31,16 @@ jobs:
     if: github.repository == 'LynahZ/FlClash' && github.ref_name == github.event.repository.default_branch
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    permissions:
+      actions: read
+      contents: read
     outputs:
       candidate: ${{ steps.merge.outputs.candidate }}
       revision: ${{ steps.merge.outputs.revision }}
+      upstream_tag: ${{ steps.merge.outputs.tag }}
+      needs_release: ${{ steps.merge.outputs.needs_release }}
+      previous_run: ${{ steps.reuse.outputs.run }}
+      previous_revision: ${{ steps.reuse.outputs.revision }}
     env:
       GIT_AUTHOR_NAME: github-actions[bot]
       GIT_AUTHOR_EMAIL: 41898282+github-actions[bot]@users.noreply.github.com
@@ -63,15 +71,49 @@ jobs:
             echo 'candidate=true' >> "$GITHUB_OUTPUT"
           fi
           echo "revision=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "upstream_revision=$release" >> "$GITHUB_OUTPUT"
+          published=$(gh api --paginate "repos/$GITHUB_REPOSITORY/releases" \
+            --jq ".[] | select(.tag_name == \"$tag-macc\" and .draft == false) | .id")
+          if [[ -z "$published" ]]; then
+            echo 'needs_release=true' >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Find a completed build for the same upstream release
+        id: reuse
+        if: >-
+          github.event_name == 'push' && steps.merge.outputs.needs_release == 'true' &&
+          steps.merge.outputs.candidate != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          UPSTREAM_TAG: ${{ steps.merge.outputs.tag }}
+          UPSTREAM_REVISION: ${{ steps.merge.outputs.upstream_revision }}
+        run: |
+          runs=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/upstream-sync.yaml/runs?branch=$GITHUB_REF_NAME&status=success&per_page=30" \
+            --jq '.workflow_runs[] | [.id, .head_sha] | @tsv')
+          while IFS=$'\t' read -r run revision; do
+            [[ -n "$run" ]] || continue
+            git merge-base --is-ancestor "$revision" HEAD || continue
+            git merge-base --is-ancestor "$UPSTREAM_REVISION" "$revision" || continue
+            version=$(git show "$revision:pubspec.yaml" | sed -n 's/^version: \([^+]*\).*/\1/p')
+            [[ "$version" == "${UPSTREAM_TAG#v}" ]] || continue
+            artifacts=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run/artifacts" \
+              --jq '[.artifacts[] | select(.expired == false and (.name | startswith("FlClash-MACC-")))] | length')
+            if [[ "$artifacts" == 5 ]]; then
+              echo "run=$run" >> "$GITHUB_OUTPUT"
+              echo "revision=$revision" >> "$GITHUB_OUTPUT"
+              break
+            fi
+          done <<< "$runs"
 
       - uses: actions/setup-go@v5
-        if: steps.merge.outputs.candidate == 'true' || github.event_name != 'schedule'
+        if: steps.merge.outputs.candidate == 'true' || steps.merge.outputs.needs_release == 'true' || github.event_name != 'schedule'
         with:
           go-version-file: core/go.mod
           cache-dependency-path: core/go.sum
 
       - name: Verify MACC and run core tests
-        if: steps.merge.outputs.candidate == 'true' || github.event_name != 'schedule'
+        if: steps.merge.outputs.candidate == 'true' || steps.merge.outputs.needs_release == 'true' || github.event_name != 'schedule'
         working-directory: core
         env:
           CGO_ENABLED: '0'
@@ -135,8 +177,10 @@ jobs:
     needs: [prepare, publish]
     if: >-
       !cancelled() && !inputs.dry_run && needs.prepare.result == 'success' &&
+      needs.prepare.outputs.previous_run == '' &&
       (needs.publish.result == 'success' ||
-        (needs.prepare.outputs.candidate != 'true' && (inputs.package_current || github.event_name == 'push')))
+        (needs.prepare.outputs.candidate != 'true' &&
+          (needs.prepare.outputs.needs_release == 'true' || inputs.package_current || github.event_name == 'push')))
     uses: ./.github/workflows/package-macc.yaml
     with:
       revision: ${{ needs.prepare.outputs.revision }}
@@ -145,3 +189,38 @@ jobs:
       KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
       STORE_PASSWORD: ${{ secrets.STORE_PASSWORD }}
       KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+
+  release:
+    needs: [prepare, package]
+    if: >-
+      !cancelled() && !inputs.dry_run && needs.prepare.result == 'success' &&
+      needs.prepare.outputs.needs_release == 'true' &&
+      (needs.package.result == 'success' || needs.prepare.outputs.previous_run != '')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      actions: read
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          sparse-checkout: .github/scripts/publish-macc-release.sh
+          sparse-checkout-cone-mode: false
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: FlClash-MACC-*
+          path: ${{ runner.temp }}/macc-artifacts
+          github-token: ${{ github.token }}
+          run-id: ${{ needs.prepare.outputs.previous_run || github.run_id }}
+
+      - name: Publish verified installation packages to the fork
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          UPSTREAM_TAG: ${{ needs.prepare.outputs.upstream_tag }}
+          REVISION: ${{ needs.prepare.outputs.previous_revision || needs.prepare.outputs.revision }}
+          SOURCE_RUN: ${{ needs.prepare.outputs.previous_run || github.run_id }}
+        run: |
+          bash .github/scripts/publish-macc-release.sh "$RUNNER_TEMP/macc-artifacts" "$RUNNER_TEMP/macc-release"
