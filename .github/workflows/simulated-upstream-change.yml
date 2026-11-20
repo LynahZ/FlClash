@@ -1,0 +1,7 @@
+name: Simulated upstream workflow update
+on: workflow_dispatch
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo upstream workflow update
