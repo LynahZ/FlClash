@@ -92,6 +92,7 @@ jobs:
           CGO_ENABLED: '0'
         run: |
           git submodule update --init -- Clash.Meta
+          (cd Clash.Meta && go test ./adapter/outbound -run '^TestMacc(SaltSources|UsesEmbeddedSalt)$' -count=1)
           go test -json . > "$RUNNER_TEMP/core-test.json" || {
             cat "$RUNNER_TEMP/core-test.json"
             exit 1
@@ -202,6 +203,7 @@ jobs:
     secrets:
       KEYSTORE: ${{ secrets.MACC_ANDROID_KEYSTORE }}
       SIGNING_PASSWORD: ${{ secrets.MACC_ANDROID_KEYSTORE_PASSWORD }}
+      MACC_SALT: ${{ secrets.MACC_SALT }}
 
   release:
     needs: [prepare, package]

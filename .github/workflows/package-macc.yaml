@@ -19,6 +19,8 @@ on:
     secrets:
       KEYSTORE:
       SIGNING_PASSWORD:
+      MACC_SALT:
+        required: true
 
 permissions:
   contents: read
@@ -160,6 +162,20 @@ jobs:
           bundle=core/Clash.Meta/component/ca/ca-certificates.crt
           curl -fsSL --retry 3 -o "$bundle" https://curl.se/ca/cacert-2026-09-25.pem
           echo "a41b5d356aea97a529fe27e0f7316d2f9d946d75927476cf9cf1b90637d00505  $bundle" | sha256sum -c -
+
+      - name: Embed MACC decoding material
+        shell: bash
+        env:
+          MACC_SALT: ${{ secrets.MACC_SALT }}
+        run: |
+          if [[ -z "$MACC_SALT" ]]; then
+            echo '::error::Set the MACC_SALT repository secret for release builds.'
+            exit 1
+          fi
+          umask 077
+          printf '%s' "$MACC_SALT" > core/Clash.Meta/adapter/outbound/macc-default.salt
+          cd core/Clash.Meta
+          MACC_RELEASE_SALT_CHECK="$MACC_SALT" CGO_ENABLED=0 go test ./adapter/outbound -run '^TestEmbeddedMaccMatchesReleaseSecret$' -count=1
 
       - name: Build package
         env:
