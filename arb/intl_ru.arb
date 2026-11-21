@@ -1137,8 +1137,5 @@
   "coreRunningDesc": "Приложение подключено к ядру",
   "forceRestartCore": "Принудительный перезапуск",
   "vpnPermissionNotGranted": "Разрешение на VPN не выдано, поэтому VPN не запущен. Постоянная VPN, заданная для другого приложения, тоже мешает запуску.",
-  "vpnServiceStartFailed": "Не удалось запустить службу VPN.",
-  "importMaccSalt": "Импорт файла соли MACC",
-  "maccSaltImported": "Соль MACC сохранена. Примените подписку повторно и переподключитесь.",
-  "maccSaltImportFailed": "Выберите действительный файл macc.salt от поставщика подписки."
+  "vpnServiceStartFailed": "Не удалось запустить службу VPN."
 }

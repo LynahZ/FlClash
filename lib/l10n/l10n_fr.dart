@@ -4003,15 +4003,4 @@ class AppLocalizationsFr extends AppLocalizations {
 
   @override
   String get vpnServiceStartFailed => 'Le service VPN n\'a pas pu démarrer.';
-
-  @override
-  String get importMaccSalt => 'Importer le fichier de sel MACC';
-
-  @override
-  String get maccSaltImported =>
-      'Sel MACC enregistré. Réappliquez l’abonnement et reconnectez-vous.';
-
-  @override
-  String get maccSaltImportFailed =>
-      'Sélectionnez un fichier macc.salt valide fourni par votre service d’abonnement.';
 }

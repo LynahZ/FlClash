@@ -76,11 +76,9 @@ FlClash 要在免责声明被接受后才会启动核心。在容器等无人点
 clash://install-config?url=<经过 URL 编码的订阅链接>
 ```
 
-**MACC 订阅。** 在内核配置目录（`config.yaml` 所在目录）创建仅包含订阅服务商 MACC 盐值的 `macc.salt` 文件，
-再导入或重新应用订阅。通过终端启动内核时也可以设置 `MIHOMO_MACC_SALT`，环境变量优先。
-在 Android 上，从「工具 → 导入 MACC 盐值文件」选择 `macc.salt`，然后重新应用订阅并连接。
+**MACC 订阅。** 本 fork 的正式安装包内置默认解码材料，可直接导入订阅。自行构建或需要覆盖默认材料时，请见 [MACC 构建说明](MACC_BUILD.md)。
 
-**Fork 同步。** `Sync upstream stable release` 每小时第 23 分钟查看上游最新的正式 Release，也支持手动运行和只验证。
+**Fork 同步。** `Sync upstream stable release` 每小时第 23 分钟检查上游正式 Release，按版本顺序每次处理一个待发布版本，也支持手动运行和只验证。
 同步按 Release 标签合入应用，并把该版本固定的内核提交合入本 fork 的 `macc-core` 分支。Go 测试（含 MACC）通过后，
 一次推送更新应用分支及有变更的内核分支。合并冲突或测试失败时可在 Actions 日志查看原因。
 涉及上游工作流文件的更新需要仓库 Secret `UPSTREAM_SYNC_TOKEN`，令牌须具有对此 fork 的 Contents 和 Workflows 读写权限。

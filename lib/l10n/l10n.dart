@@ -6941,24 +6941,6 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'The VPN service could not start.'**
   String get vpnServiceStartFailed;
-
-  /// No description provided for @importMaccSalt.
-  ///
-  /// In en, this message translates to:
-  /// **'Import MACC salt file'**
-  String get importMaccSalt;
-
-  /// No description provided for @maccSaltImported.
-  ///
-  /// In en, this message translates to:
-  /// **'MACC salt saved. Reapply the subscription and reconnect.'**
-  String get maccSaltImported;
-
-  /// No description provided for @maccSaltImportFailed.
-  ///
-  /// In en, this message translates to:
-  /// **'Choose a valid macc.salt file from your subscription provider.'**
-  String get maccSaltImportFailed;
 }
 
 class _AppLocalizationsDelegate

@@ -1,7 +1,3 @@
-import 'dart:convert';
-import 'dart:io';
-
-import 'package:file_picker/file_picker.dart';
 import 'package:fl_clash/common/common.dart';
 import 'package:fl_clash/enum/enum.dart';
 import 'package:fl_clash/l10n/l10n.dart';
@@ -16,7 +12,6 @@ import 'package:fl_clash/views/hotkey.dart';
 import 'package:fl_clash/widgets/widgets.dart';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:path/path.dart' show join;
 
 import 'config/advanced.dart';
 import 'developer.dart';
@@ -73,7 +68,6 @@ class _ToolViewState extends ConsumerState<ToolsView> {
         const _ThemeItem(),
         if (system.isDesktop) const _HotkeyItem(),
         if (system.isAndroid) const _AccessItem(),
-        if (system.isAndroid) MaccSaltImportItem(pickFile: picker.pickerFile),
         const _BackupItem(),
         const _AdvancedConfigItem(),
         const _GeneralItem(),
@@ -163,63 +157,6 @@ class _ThemeItem extends StatelessWidget {
       leading: const GlyphIcon(AppGlyphs.paintbrush),
       title: Text(context.appLocalizations.theme),
       widget: const ThemeView(),
-    );
-  }
-}
-
-class MaccSaltImportItem extends StatefulWidget {
-  final Future<PlatformFile?> Function() pickFile;
-
-  const MaccSaltImportItem({super.key, required this.pickFile});
-
-  @override
-  State<MaccSaltImportItem> createState() => _MaccSaltItemState();
-}
-
-class _MaccSaltItemState extends State<MaccSaltImportItem> {
-  bool _importing = false;
-
-  Future<void> _import() async {
-    if (_importing) return;
-    setState(() => _importing = true);
-    final strings = context.appLocalizations;
-    try {
-      final file = await widget.pickFile();
-      if (file == null) return;
-      final length = await file.length();
-      if (file.name != 'macc.salt' || length == null || length > 4096) {
-        throw const FormatException();
-      }
-      final salt = utf8
-          .decode(await file.readBytes())
-          .replaceFirst(RegExp(r'[\r\n]+$'), '');
-      if (salt.trim().isEmpty || salt.contains(RegExp(r'[\x00-\x1f\x7f]'))) {
-        throw const FormatException();
-      }
-      final target = File(join(await appPath.homeDirPath, 'macc.salt'));
-      await target.writeAsStringAtomically(salt);
-      if (mounted) {
-        await dialogs.showAlert(
-          message: TextSpan(text: strings.maccSaltImported),
-        );
-      }
-    } catch (_) {
-      if (mounted) {
-        await dialogs.showAlert(
-          message: TextSpan(text: strings.maccSaltImportFailed),
-        );
-      }
-    } finally {
-      if (mounted) setState(() => _importing = false);
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return ListItem(
-      leading: const GlyphIcon(AppGlyphs.key),
-      title: Text(context.appLocalizations.importMaccSalt),
-      onTap: _importing ? null : _import,
     );
   }
 }

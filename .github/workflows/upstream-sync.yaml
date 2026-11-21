@@ -9,6 +9,8 @@ on:
       - '.github/workflows/upstream-sync.yaml'
       - '.github/workflows/package-macc.yaml'
       - '.github/scripts/publish-macc-release.sh'
+      - '.github/scripts/prepare-upstream-sync.sh'
+      - '.github/scripts/select-upstream-release*.js'
   workflow_dispatch:
     inputs:
       dry_run:
@@ -58,8 +60,12 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          tag=$(gh api repos/chen08209/FlClash/releases/latest \
-            --jq 'select(.draft == false and .prerelease == false) | .tag_name')
+          node --test .github/scripts/select-upstream-release.test.js
+          upstream_releases="$RUNNER_TEMP/upstream-releases.json"
+          fork_releases="$RUNNER_TEMP/fork-releases.json"
+          gh api --paginate --slurp 'repos/chen08209/FlClash/releases?per_page=100' > "$upstream_releases"
+          gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/releases?per_page=100" > "$fork_releases"
+          tag=$(node .github/scripts/select-upstream-release.js "$upstream_releases" "$fork_releases")
           if [[ ! $tag =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
             echo "::error::The latest upstream release has an unexpected tag."
             exit 1
@@ -73,8 +79,7 @@ jobs:
           fi
           echo "revision=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
-          published=$(gh api --paginate "repos/$GITHUB_REPOSITORY/releases" \
-            --jq ".[] | select(.tag_name == \"$tag-macc\" and .draft == false) | .id")
+          published=$(jq -r --arg tag "$tag-macc" 'flatten | .[] | select(.tag_name == $tag and .draft == false) | .id' "$fork_releases")
           if [[ -z "$published" ]]; then
             echo 'needs_release=true' >> "$GITHUB_OUTPUT"
           fi

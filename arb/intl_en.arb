@@ -1252,8 +1252,5 @@
   "coreRunningDesc": "The app is connected to the core",
   "forceRestartCore": "Force restart",
   "vpnPermissionNotGranted": "VPN permission was not granted, so the VPN did not start. An always-on VPN set for another app also blocks it.",
-  "vpnServiceStartFailed": "The VPN service could not start.",
-  "importMaccSalt": "Import MACC salt file",
-  "maccSaltImported": "MACC salt saved. Reapply the subscription and reconnect.",
-  "maccSaltImportFailed": "Choose a valid macc.salt file from your subscription provider."
+  "vpnServiceStartFailed": "The VPN service could not start."
 }

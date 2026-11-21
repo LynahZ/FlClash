@@ -17,7 +17,7 @@ old_core=$(git rev-parse "$base:$core")
 released_core=$(git rev-parse "$release:$core")
 git submodule update --init -- "$core"
 
-if ! git merge --no-ff --no-commit "$release"; then
+if ! git -c submodule.recurse=false merge --no-ff --no-commit "$release"; then
   git rev-parse --verify --quiet MERGE_HEAD >/dev/null
   if [[ $(git diff --name-only --diff-filter=U) != "$core" ]]; then
     echo "::error::FlClash $tag has merge conflicts outside the core gitlink."
@@ -31,11 +31,14 @@ if [[ $(git config -f .gitmodules --get submodule.core/Clash.Meta.url) != ../FlC
   exit 1
 fi
 
+git -C "$core" checkout --detach "$old_core"
 if ! git -C "$core" merge-base --is-ancestor "$released_core" "$old_core" 2>/dev/null; then
   git -C "$core" fetch --no-tags "$core_upstream" "$released_core"
   git -C "$core" merge --no-ff -m "chore: merge FlClash $tag core" "$released_core"
 fi
 new_core=$(git -C "$core" rev-parse HEAD)
+git -C "$core" merge-base --is-ancestor "$old_core" "$new_core"
+git -C "$core" merge-base --is-ancestor "$released_core" "$new_core"
 git add -- "$core"
 git diff --cached --check
 git commit -m "chore: sync upstream FlClash $tag"

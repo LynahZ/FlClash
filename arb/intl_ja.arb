@@ -1137,8 +1137,5 @@
   "coreRunningDesc": "アプリはコアに接続されています",
   "forceRestartCore": "強制再起動",
   "vpnPermissionNotGranted": "VPN の権限が許可されなかったため、VPN は起動しませんでした。ほかのアプリが常時接続 VPN に設定されている場合も起動できません。",
-  "vpnServiceStartFailed": "VPN サービスを起動できませんでした。",
-  "importMaccSalt": "MACC ソルトファイルをインポート",
-  "maccSaltImported": "MACC ソルトを保存しました。サブスクリプションを再適用して再接続してください。",
-  "maccSaltImportFailed": "契約先から提供された有効な macc.salt ファイルを選択してください。"
+  "vpnServiceStartFailed": "VPN サービスを起動できませんでした。"
 }

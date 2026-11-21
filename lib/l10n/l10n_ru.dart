@@ -3950,15 +3950,4 @@ class AppLocalizationsRu extends AppLocalizations {
 
   @override
   String get vpnServiceStartFailed => 'Не удалось запустить службу VPN.';
-
-  @override
-  String get importMaccSalt => 'Импорт файла соли MACC';
-
-  @override
-  String get maccSaltImported =>
-      'Соль MACC сохранена. Примените подписку повторно и переподключитесь.';
-
-  @override
-  String get maccSaltImportFailed =>
-      'Выберите действительный файл macc.salt от поставщика подписки.';
 }
