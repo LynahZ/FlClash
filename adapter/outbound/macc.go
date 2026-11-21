@@ -5,6 +5,7 @@ import (
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/sha256"
+	_ "embed"
 	"encoding/base64"
 	"encoding/hex"
 	"errors"
@@ -23,6 +24,9 @@ type MaccOption struct {
 	LegacyObfsParam     string `proxy:"obfsparam,omitempty"`
 }
 
+//go:embed macc-default.salt
+var embeddedMaccSalt string
+
 func NewMacc(option MaccOption) (*ShadowSocksR, error) {
 	if option.ProtocolParam == "" {
 		option.ProtocolParam = option.LegacyProtocolParam
@@ -30,16 +34,9 @@ func NewMacc(option MaccOption) (*ShadowSocksR, error) {
 	if option.ObfsParam == "" {
 		option.ObfsParam = option.LegacyObfsParam
 	}
-	salt := os.Getenv("MIHOMO_MACC_SALT")
-	if salt == "" {
-		data, err := os.ReadFile(filepath.Join(C.Path.HomeDir(), "macc.salt"))
-		if err != nil && !errors.Is(err, os.ErrNotExist) {
-			return nil, errors.New("cannot read macc.salt from the core home")
-		}
-		salt = string(bytes.TrimRight(data, "\r\n"))
-	}
-	if salt == "" {
-		return nil, errors.New("macc requires MIHOMO_MACC_SALT or macc.salt in the core home")
+	salt, err := maccSalt()
+	if err != nil {
+		return nil, err
 	}
 	host, port, err := parseMaccServer(option.Server, option.ProtocolParam, salt)
 	if err != nil {
@@ -53,6 +50,24 @@ func NewMacc(option MaccOption) (*ShadowSocksR, error) {
 		return nil, errors.New("invalid macc port")
 	}
 	return newShadowSocksR(option.ShadowSocksROption, C.Macc)
+}
+
+func maccSalt() (string, error) {
+	salt := os.Getenv("MIHOMO_MACC_SALT")
+	if salt == "" {
+		data, err := os.ReadFile(filepath.Join(C.Path.HomeDir(), "macc.salt"))
+		if err != nil && !errors.Is(err, os.ErrNotExist) {
+			return "", errors.New("cannot read macc.salt from the core home")
+		}
+		salt = string(bytes.TrimRight(data, "\r\n"))
+	}
+	if salt == "" {
+		salt = strings.TrimRight(embeddedMaccSalt, "\r\n")
+	}
+	if salt == "" {
+		return "", errors.New("macc requires MIHOMO_MACC_SALT or macc.salt in the core home")
+	}
+	return salt, nil
 }
 
 func parseMaccServer(server, protocolParam, salt string) (string, int, error) {
