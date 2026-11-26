@@ -40,7 +40,17 @@ new_core=$(git -C "$core" rev-parse HEAD)
 git -C "$core" merge-base --is-ancestor "$old_core" "$new_core"
 git -C "$core" merge-base --is-ancestor "$released_core" "$new_core"
 git add -- "$core"
-git diff --cached --check
+whitespace_paths=(.)
+while IFS= read -r -d '' path; do
+  case "${path##*/}" in
+    LICENSE|LICENSE.*|LICENSE-*|COPYING|COPYING.*|COPYING-*|OFL|OFL.txt)
+      if git diff --cached --quiet "$release" -- ":(top,literal)$path"; then
+        whitespace_paths+=(":(exclude,top,literal)$path")
+      fi
+      ;;
+  esac
+done < <(git diff --cached --name-only -z)
+git diff --cached --check -- "${whitespace_paths[@]}"
 git commit -m "chore: sync upstream FlClash $tag"
 
 mkdir -p "$bundles"
