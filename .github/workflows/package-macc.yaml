@@ -43,6 +43,9 @@ jobs:
           - platform: macos
             arch: arm64
             runner: macos-26
+          - platform: macos
+            arch: amd64
+            runner: macos-15-intel
           - platform: windows
             arch: amd64
             runner: windows-2022
@@ -155,6 +158,10 @@ jobs:
 
       - name: Install Flutter dependencies
         run: flutter pub get
+
+      - name: Disable Impeller on Intel macOS
+        if: matrix.platform == 'macos' && matrix.arch == 'amd64'
+        run: plutil -replace FLTEnableImpeller -bool NO macos/Runner/Info.plist
 
       - name: Fetch the pinned CA bundle
         shell: bash

@@ -14,6 +14,7 @@ jq -es --arg revision "$REVISION" --arg version "${UPSTREAM_TAG#v}" '
   [.[].artifacts[]] | sort_by(.os, .arch, .form) |
   if map([.os, .arch, .form, (.name | split(".") | last)]) != [
     ["android", "arm64", null, "apk"],
+    ["macos", "amd64", null, "dmg"],
     ["macos", "arm64", null, "dmg"],
     ["windows", "amd64", "portable", "zip"],
     ["windows", "amd64", "setup", "exe"],
@@ -71,7 +72,7 @@ if [[ -z "$existing" ]]; then
 Based on [upstream FlClash $UPSTREAM_TAG](https://github.com/chen08209/FlClash/releases/tag/$UPSTREAM_TAG).
 Includes MACC support. [GitHub Actions build](https://github.com/$GH_REPO/actions/runs/$SOURCE_RUN).
 
-- macOS Apple Silicon (DMG)
+- macOS Apple Silicon and Intel (DMG)
 - Windows x64 and ARM64 (installer and portable ZIP)
 - Android ARM64 (APK)
 

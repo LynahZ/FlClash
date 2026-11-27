@@ -42,6 +42,7 @@ jobs:
       revision: ${{ steps.merge.outputs.revision }}
       upstream_tag: ${{ steps.merge.outputs.tag }}
       needs_release: ${{ steps.merge.outputs.needs_release }}
+      needs_macos_amd64_backfill: ${{ steps.merge.outputs.needs_macos_amd64_backfill }}
       build_version: ${{ steps.version.outputs.build_version }}
       android_version_code: ${{ steps.version.outputs.android_version_code }}
     env:
@@ -82,6 +83,9 @@ jobs:
           published=$(jq -r --arg tag "$tag-macc" 'flatten | .[] | select(.tag_name == $tag and .draft == false) | .id' "$fork_releases")
           if [[ -z "$published" ]]; then
             echo 'needs_release=true' >> "$GITHUB_OUTPUT"
+          elif ! jq -e --arg tag "$tag-macc" --arg asset "FlClash-${tag#v}-macos-amd64.dmg" \
+            'flatten | .[] | select(.tag_name == $tag and .draft == false) | .assets | any(.name == $asset)' "$fork_releases" > /dev/null; then
+            echo 'needs_macos_amd64_backfill=true' >> "$GITHUB_OUTPUT"
           fi
 
       - uses: actions/setup-go@v5
@@ -239,3 +243,63 @@ jobs:
           SOURCE_RUN: ${{ github.run_id }}
         run: |
           bash .github/scripts/publish-macc-release.sh "$RUNNER_TEMP/macc-artifacts" "$RUNNER_TEMP/macc-release"
+
+  backfill-macos-amd64:
+    needs: [prepare, package]
+    if: >-
+      !cancelled() && needs.package.result == 'success' &&
+      needs.prepare.outputs.needs_release != 'true' &&
+      needs.prepare.outputs.needs_macos_amd64_backfill == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: FlClash-MACC-macos-amd64
+          path: ${{ runner.temp }}/macos-amd64
+
+      - name: Upload Intel macOS DMG to the published release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          UPSTREAM_TAG: ${{ needs.prepare.outputs.upstream_tag }}
+          REVISION: ${{ needs.prepare.outputs.revision }}
+        run: |
+          version=${UPSTREAM_TAG#v}
+          tag="$UPSTREAM_TAG-macc"
+          asset="FlClash-$version-macos-amd64.dmg"
+          manifest="$RUNNER_TEMP/macos-amd64/manifest.json"
+          dmg_name=$(jq -er --arg revision "$REVISION" --arg version "$version" '
+            .artifacts |
+            if length != 1 then error("Expected 1 macOS amd64 artifact") else .[0] end |
+            if .os != "macos" or .arch != "amd64" or .form != null or
+               .commit != $revision or .version != $version or
+               (.name | split(".") | last) != "dmg"
+            then error("Unexpected macOS amd64 artifact metadata")
+            else .name end
+          ' "$manifest")
+          digest=$(jq -er '.artifacts[0].sha256' "$manifest")
+          [[ "$digest" =~ ^[a-f0-9]{64}$ ]]
+          stage="$RUNNER_TEMP/backfill"
+          mkdir -p "$stage"
+          cp -- "$RUNNER_TEMP/macos-amd64/$dmg_name" "$stage/$asset"
+          printf '%s  %s\n' "$digest" "$asset" > "$stage/check.sha256"
+          (cd "$stage" && sha256sum --check --strict check.sha256)
+
+          if gh release download "$tag" --repo "$GH_REPO" --pattern SHA256SUMS --dir "$stage"; then
+            grep -v -F "  $asset" "$stage/SHA256SUMS" > "$stage/SHA256SUMS.new" || true
+          else
+            : > "$stage/SHA256SUMS.new"
+          fi
+          printf '%s  %s\n' "$digest" "$asset" >> "$stage/SHA256SUMS.new"
+          LC_ALL=C sort -k2 -o "$stage/SHA256SUMS" "$stage/SHA256SUMS.new"
+
+          gh release upload "$tag" --repo "$GH_REPO" --clobber "$stage/$asset" "$stage/SHA256SUMS"
+
+          body=$(gh api "repos/$GH_REPO/releases/tags/$tag" --jq .body)
+          if grep -q '^- macOS Apple Silicon (DMG)$' <<< "$body"; then
+            updated_body=$(sed 's/^- macOS Apple Silicon (DMG)$/- macOS Apple Silicon and Intel (DMG)/' <<< "$body")
+            gh release edit "$tag" --repo "$GH_REPO" --notes "$updated_body"
+          fi
